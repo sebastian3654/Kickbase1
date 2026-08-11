@@ -338,6 +338,7 @@
     if (!name || !Number.isFinite(price) || price <= 0) return;
     pushHistory();
     state.players.push({ id: Date.now(), name, pos, price });
+    state.cash = state.cash - price;
     el("p-name").value = "";
     el("p-price").value = "";
     render();
@@ -346,7 +347,9 @@
 
   function removePlayer(id) {
     pushHistory();
+    const removed = state.players.find((p) => String(p.id) === String(id));
     state.players = state.players.filter((p) => String(p.id) !== String(id));
+    if (removed) state.cash = state.cash + (Number(removed.price) || 0);
     render();
     scheduleSave();
   }
