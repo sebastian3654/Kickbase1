@@ -570,10 +570,12 @@
         price: Number(p.mv || p.marketValue || p.marketValue || 0),
       }));
 
-      let budget = pickBudget(data);
-      if (budget == null) {
-        budget = await kbFetchBudget();
+      let cash = pickBudget(data);
+      if (cash == null) {
+        cash = await kbFetchBudget();
       }
+      const squadValue = players.reduce((s, p) => s + (Number(p.price) || 0), 0);
+      const budget = cash != null ? cash + squadValue : null;
 
       nameKey = "kickbase_" + sanitizeKey(String(kb.userId));
       localStorage.setItem(LOCAL_NAME_KEY, nameKey);
@@ -583,7 +585,9 @@
       render();
       scheduleSave();
       if (budget == null) {
-        setStatus("✓ Gespeichert — Budget konnte nicht automatisch übernommen werden, bitte oben von Hand eintragen.", true);
+        setTimeout(() => {
+          setStatus("⚠ Guthaben konnte nicht automatisch übernommen werden, bitte Startbudget oben von Hand eintragen (Kaderwert + Restguthaben).", true);
+        }, 700);
       }
       el("market-section").classList.remove("hidden");
       kbLoadMarket();
