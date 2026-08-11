@@ -141,7 +141,6 @@
       <input id="kb-email" class="field" placeholder="Kickbase E-Mail" autocomplete="off" style="margin-bottom:8px;" />
       <input id="kb-pass" type="password" class="field" placeholder="Kickbase Passwort" autocomplete="off" style="margin-bottom:8px;" />
       <button id="kb-login-btn" class="btn-primary" style="width:100%;justify-content:center;padding:12px;font-size:14px;">Verbinden</button>
-      <div id="kb-error" class="status-error hidden" style="margin-top:10px;font-size:13px;"></div>
     </div>
 
     <div id="kb-league-box" class="hidden" style="margin-top:14px;text-align:left;">
@@ -149,6 +148,8 @@
       <select id="kb-league-select" class="field" style="margin-bottom:8px;"></select>
       <button id="kb-league-btn" class="btn-primary" style="width:100%;justify-content:center;padding:12px;font-size:14px;">Kader laden</button>
     </div>
+
+    <div id="kb-error" class="status-error hidden" style="margin-top:10px;font-size:13px;text-align:left;"></div>
   </div>
 </div>
 
@@ -496,11 +497,20 @@
   }
 
   async function kbLoadSquad() {
-    kb.leagueId = el("kb-league-select").value;
-    if (!kb.leagueId) return;
-    el("kb-league-btn").disabled = true;
-    el("kb-league-btn").textContent = "Lade Kader …";
+    el("kb-error").classList.add("hidden");
     try {
+      const sel = el("kb-league-select");
+      if (!sel) throw new Error("Interner Fehler: Liga-Auswahl nicht gefunden.");
+      kb.leagueId = sel.value;
+      if (!kb.leagueId || kb.leagueId === "undefined") {
+        throw new Error("Keine gültige Liga-ID gefunden (Wert: " + JSON.stringify(kb.leagueId) + "). Die Kickbase-Antwort für Ligen hat vermutlich ein anderes Format als erwartet.");
+      }
+      if (!kb.token) throw new Error("Kein Token vorhanden — bitte nochmal einloggen.");
+      if (!kb.userId) throw new Error("Keine User-ID vorhanden — Login-Antwort hat vermutlich ein anderes Format als erwartet.");
+
+      el("kb-league-btn").disabled = true;
+      el("kb-league-btn").textContent = "Lade Kader …";
+
       const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/players`, {
         headers: { Authorization: `Bearer ${kb.token}` },
       });
