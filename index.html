@@ -223,6 +223,7 @@
   const db = getDatabase(app);
 
   const LOCAL_NAME_KEY = "kassenbuch_name";
+  const LOCAL_KB_KEY = "kassenbuch_kb_session";
   const fmt = (n) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(n) ? n : 0);
   const posLabel = { TW: "TW", AB: "ABW", MF: "MF", ST: "ANG" };
   const sanitizeKey = (name) => name.trim().toLowerCase().replace(/[.#$\[\]\/\s]+/g, "_");
@@ -527,6 +528,7 @@
   async function fetchKickbaseSquad() {
     const squadUrl = `${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/players`;
     let res = await fetch(squadUrl, { headers: { Authorization: `Bearer ${kb.token}` } });
+    if (res.status === 401) throw new Error("SESSION_EXPIRED");
 
     // Fallback: manche Kickbase-Versionen nutzen /squad statt /users/{id}/players
     if (res.status === 404) {
@@ -579,6 +581,7 @@
 
       nameKey = "kickbase_" + sanitizeKey(String(kb.userId));
       localStorage.setItem(LOCAL_NAME_KEY, nameKey);
+      localStorage.setItem(LOCAL_KB_KEY, JSON.stringify({ token: kb.token, userId: kb.userId, leagueId: kb.leagueId }));
       pushHistory();
       state = { cash: cash != null ? cash : (state.cash || 0), players };
       showApp();
@@ -634,6 +637,7 @@
       const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/market`, {
         headers: { Authorization: `Bearer ${kb.token}` },
       });
+      if (res.status === 401) { handleKbSessionExpired(); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list = data.players || data.it || data.market || [];
@@ -703,8 +707,19 @@
         scheduleSave();
       }
     } catch (e) {
-      // Stiller Fehlschlag beim Hintergrund-Update, App bleibt nutzbar
+      if (e && e.message === "SESSION_EXPIRED") {
+        handleKbSessionExpired();
+      }
+      // sonst: stiller Fehlschlag beim Hintergrund-Update, App bleibt nutzbar
     }
+  }
+
+  function handleKbSessionExpired() {
+    stopMarketAutoRefresh();
+    kb = { token: null, userId: null, leagueId: null };
+    localStorage.removeItem(LOCAL_KB_KEY);
+    el("market-section").classList.add("hidden");
+    setStatus("⚠ Kickbase-Sitzung abgelaufen — bitte über \"Abmelden\" neu mit Kickbase verbinden.", true);
   }
 
   function refreshAll() {
@@ -733,6 +748,7 @@
   function logout() {
     stopMarketAutoRefresh();
     localStorage.removeItem(LOCAL_NAME_KEY);
+    localStorage.removeItem(LOCAL_KB_KEY);
     nameKey = null;
     kb = { token: null, userId: null, leagueId: null };
     history = [];
@@ -766,7 +782,21 @@
   const savedName = localStorage.getItem(LOCAL_NAME_KEY);
   if (savedName) {
     el("login-name").value = savedName;
-    loginWithName(savedName);
+    loginWithName(savedName).then(() => {
+      if (savedName.startsWith("kickbase_")) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(LOCAL_KB_KEY) || "null");
+          if (saved && saved.token && saved.userId && saved.leagueId) {
+            kb = saved;
+            el("market-section").classList.remove("hidden");
+            startMarketAutoRefresh();
+            refreshAll();
+          }
+        } catch (e) {
+          // keine gültige gespeicherte Session, einfach ignorieren
+        }
+      }
+    });
   } else {
     showLogin();
   }
