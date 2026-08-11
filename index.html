@@ -497,6 +497,37 @@
     }
   }
 
+  function pickBudget(obj) {
+    if (!obj || typeof obj !== "object") return null;
+    const candidates = ["budget", "b", "bu", "money", "cash", "tv"];
+    for (const key of candidates) {
+      if (typeof obj[key] === "number") return obj[key];
+    }
+    if (obj.user && typeof obj.user === "object") return pickBudget(obj.user);
+    if (obj.u && typeof obj.u === "object") return pickBudget(obj.u);
+    return null;
+  }
+
+  async function kbFetchBudget() {
+    const urls = [
+      `${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}`,
+      `${KB_BASE}/v4/leagues/${kb.leagueId}/me`,
+      `${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/stats`,
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${kb.token}` } });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const budget = pickBudget(data);
+        if (budget != null) return budget;
+      } catch (e) {
+        // nächste URL versuchen
+      }
+    }
+    return null;
+  }
+
   async function kbLoadSquad() {
     el("kb-error").classList.add("hidden");
     try {
@@ -539,13 +570,21 @@
         price: Number(p.mv || p.marketValue || p.marketValue || 0),
       }));
 
+      let budget = pickBudget(data);
+      if (budget == null) {
+        budget = await kbFetchBudget();
+      }
+
       nameKey = "kickbase_" + sanitizeKey(String(kb.userId));
       localStorage.setItem(LOCAL_NAME_KEY, nameKey);
       pushHistory();
-      state = { budget: state.budget || 50000000, players };
+      state = { budget: budget != null ? budget : (state.budget || 50000000), players };
       showApp();
       render();
       scheduleSave();
+      if (budget == null) {
+        setStatus("✓ Gespeichert — Budget konnte nicht automatisch übernommen werden, bitte oben von Hand eintragen.", true);
+      }
       el("market-section").classList.remove("hidden");
       kbLoadMarket();
     } catch (e) {
@@ -554,6 +593,31 @@
       el("kb-league-btn").disabled = false;
       el("kb-league-btn").textContent = "Kader laden";
     }
+  }
+
+  function formatExpiry(p) {
+    // Kickbase liefert das Ablaufdatum vermutlich entweder als Restsekunden
+    // oder als ISO-Datum - wir versuchen beides, mit mehreren Feldnamen.
+    let ms = null;
+    const secondsField = p.exs ?? p.expirySeconds ?? p.expiry;
+    const dateField = p.exd ?? p.expiresAt ?? p.dt ?? p.date;
+
+    if (typeof secondsField === "number" && secondsField > 0) {
+      ms = secondsField * 1000;
+    } else if (dateField) {
+      const d = new Date(dateField);
+      if (!isNaN(d.getTime())) ms = d.getTime() - Date.now();
+    }
+    if (ms == null || ms <= 0) return null;
+
+    const totalMin = Math.floor(ms / 60000);
+    const days = Math.floor(totalMin / (60 * 24));
+    const hours = Math.floor((totalMin % (60 * 24)) / 60);
+    const mins = totalMin % 60;
+
+    if (days > 0) return `noch ${days}T ${hours}Std`;
+    if (hours > 0) return `noch ${hours}Std ${mins}Min`;
+    return `noch ${mins}Min`;
   }
 
   async function kbLoadMarket() {
@@ -578,7 +642,7 @@
           const name = [p.fn || p.firstName, p.ln || p.lastName || p.n].filter(Boolean).join(" ") || "Unbekannt";
           const pos = posMap[p.pos || p.position] || "MF";
           const price = Number(p.prc || p.price || p.mv || p.marketValue || 0);
-          const expiry = p.exs || p.expiry;
+          const expiryText = formatExpiry(p);
           const row = document.createElement("div");
           row.className = "market-row";
           row.innerHTML = `
@@ -587,7 +651,7 @@
             <span class="ppos">${pos}</span>
             <div>
               <span class="pprice num">${fmt(price)}</span>
-              ${expiry ? `<span class="market-expiry">läuft ab</span>` : ""}
+              ${expiryText ? `<span class="market-expiry">${expiryText}</span>` : `<span class="market-expiry">Ablauf unbekannt</span>`}
             </div>
           `;
           marketList.appendChild(row);
