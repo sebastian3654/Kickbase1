@@ -173,7 +173,7 @@
     <div class="score"><div class="score-label">KADERWERT</div><div class="score-value num" id="score-squad" style="font-size:26px;"></div></div>
     <div class="score" style="border-left:1px solid var(--border);">
       <div class="score-label">RESTGELD</div>
-      <input id="cash-input" class="field num" inputmode="numeric" style="text-align:center;font-size:20px;font-weight:800;border:none;background:transparent;padding:2px;" />
+      <input id="cash-input" class="field num" inputmode="decimal" style="text-align:center;font-size:20px;font-weight:800;border:none;background:transparent;padding:2px;" />
     </div>
   </div>
 
@@ -192,7 +192,7 @@
       <option value="MF" selected>MF</option>
       <option value="ST">ANG</option>
     </select>
-    <input id="p-price" class="field num" placeholder="Preis" inputmode="numeric" />
+    <input id="p-price" class="field num" placeholder="Preis" inputmode="decimal" />
     <button id="add-btn" class="btn-primary">+ Hinzufügen</button>
   </div>
 
@@ -228,6 +228,7 @@
   const LOCAL_NAME_KEY = "kassenbuch_name";
   const LOCAL_KB_KEY = "kassenbuch_kb_session";
   const fmt = (n) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(n) ? n : 0);
+  const fmtPlain = (n) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Number.isFinite(n) ? n : 0);
   const posLabel = { TW: "TW", AB: "ABW", MF: "MF", ST: "ANG" };
   const sanitizeKey = (name) => name.trim().toLowerCase().replace(/[.#$\[\]\/\s]+/g, "_");
 
@@ -265,7 +266,7 @@
 
     const squadValue = state.players.reduce((s, p) => s + (Number(p.price) || 0), 0);
     const cashEl = el("cash-input");
-    if (document.activeElement !== cashEl) cashEl.value = state.cash;
+    if (document.activeElement !== cashEl) cashEl.value = fmtPlain(state.cash);
 
     const squadEl = el("score-squad");
     squadEl.textContent = fmt(squadValue);
