@@ -116,7 +116,7 @@
   textarea.field{resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px;}
   .link-btn{background:none;border:none;color:var(--muted-2);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;font-family:inherit;}
   .market-row{
-    display:grid;grid-template-columns:36px 1fr 56px auto;align-items:center;gap:10px;
+    display:grid;grid-template-columns:36px 1fr 56px auto 32px;align-items:center;gap:10px;
     padding:12px 4px;border-bottom:1px solid var(--border-soft);
   }
   .market-row:last-child{border-bottom:none;}
@@ -166,16 +166,12 @@
   <p class="status-line" id="status-line">&nbsp;</p>
   <div id="warn-box" class="warn hidden"></div>
 
-  <div class="scoreboard">
-    <div class="score"><div class="score-label">BUDGET</div><div class="score-value num" id="score-budget" style="font-size:26px;"></div></div>
-    <div class="score"><div class="score-label">AUSGEGEBEN</div><div class="score-value num" id="score-spent" style="font-size:26px;"></div></div>
-    <div class="score"><div class="score-label">VERFÜGBAR</div><div class="score-value num" id="score-remaining" style="font-size:26px;"></div></div>
-  </div>
-
-  <div style="display:flex;gap:8px;margin-bottom:28px;align-items:center;">
-    <label class="muted" style="white-space:nowrap;">Startbudget</label>
-    <input id="budget-input" class="field num" inputmode="numeric" />
-    <span class="muted-2">€</span>
+  <div class="scoreboard" style="grid-template-columns:1fr 1fr;margin-bottom:28px;">
+    <div class="score"><div class="score-label">KADERWERT</div><div class="score-value num" id="score-squad" style="font-size:26px;"></div></div>
+    <div class="score" style="border-left:1px solid var(--border);">
+      <div class="score-label">RESTGELD</div>
+      <input id="cash-input" class="field num" inputmode="numeric" style="text-align:center;font-size:20px;font-weight:800;border:none;background:transparent;padding:2px;" />
+    </div>
   </div>
 
   <div style="margin-bottom:20px;">
@@ -231,7 +227,7 @@
   const posLabel = { TW: "TW", AB: "ABW", MF: "MF", ST: "ANG" };
   const sanitizeKey = (name) => name.trim().toLowerCase().replace(/[.#$\[\]\/\s]+/g, "_");
 
-  let state = { budget: 50000000, players: [] };
+  let state = { cash: 0, players: [] };
   let nameKey = null;
   let suppressNextRemoteWrite = false;
   let saveTimer = null;
@@ -260,19 +256,17 @@
   }
 
   function render() {
-    el("subtitle").textContent = `Kickbase-Kader & Budget im Blick — ${state.players.length} Spieler eingetragen`;
-    el("budget-input").value = state.budget;
+    el("subtitle").textContent = `Kickbase-Kader im Blick — ${state.players.length} Spieler eingetragen`;
 
-    const totalSpent = state.players.reduce((s, p) => s + (Number(p.price) || 0), 0);
-    const remaining = state.budget - totalSpent;
-    const over = remaining < 0;
+    const squadValue = state.players.reduce((s, p) => s + (Number(p.price) || 0), 0);
+    const cashEl = el("cash-input");
+    if (document.activeElement !== cashEl) cashEl.value = state.cash;
 
-    el("score-budget").textContent = fmt(state.budget);
-    el("score-spent").textContent = fmt(totalSpent);
-    const remEl = el("score-remaining");
-    remEl.textContent = fmt(remaining);
-    remEl.style.color = over ? "var(--danger)" : "var(--accent)";
-    [el("score-budget"), el("score-spent"), remEl].forEach((n) => {
+    const squadEl = el("score-squad");
+    squadEl.textContent = fmt(squadValue);
+    squadEl.style.color = "var(--accent)";
+    cashEl.style.color = state.cash < 0 ? "var(--danger)" : "#FFFFFF";
+    [squadEl].forEach((n) => {
       const len = n.textContent.length;
       n.style.fontSize = (len > 12 ? 16 : len > 10 ? 19 : len > 8 ? 22 : 26) + "px";
     });
@@ -317,7 +311,7 @@
   }
 
   function pushHistory() {
-    history.push(JSON.stringify({ budget: state.budget, players: state.players }));
+    history.push(JSON.stringify({ cash: state.cash, players: state.players }));
     if (history.length > HISTORY_LIMIT) history.shift();
     el("undo-btn").disabled = false;
   }
@@ -325,7 +319,7 @@
   function undo() {
     if (history.length === 0) return;
     const prev = JSON.parse(history.pop());
-    state = { budget: prev.budget, players: prev.players };
+    state = { cash: prev.cash, players: prev.players };
     el("undo-btn").disabled = history.length === 0;
     render();
     scheduleSave();
@@ -351,10 +345,11 @@
     scheduleSave();
   }
 
-  function applyBudget() {
-    const v = Number(el("budget-input").value.replace(/\./g, "").replace(",", "."));
-    if (Number.isFinite(v) && v >= 0) {
-      state.budget = v;
+  function applyCash() {
+    const v = Number(el("cash-input").value.replace(/\./g, "").replace(",", "."));
+    if (Number.isFinite(v)) {
+      pushHistory();
+      state.cash = v;
       render();
       scheduleSave();
     }
@@ -394,11 +389,23 @@
   }
 
   function resetAll() {
-    if (!confirm("Wirklich alles zurücksetzen? Kader und Budget werden gelöscht.")) return;
+    if (!confirm("Wirklich alles zurücksetzen? Kader und Restgeld werden gelöscht.")) return;
     pushHistory();
-    state = { budget: 50000000, players: [] };
+    state = { cash: 0, players: [] };
     render();
     scheduleSave();
+  }
+
+  function migrateState(data) {
+    const players = Array.isArray(data.players) ? data.players : [];
+    if (typeof data.cash === "number") {
+      return { cash: data.cash, players };
+    }
+    if (typeof data.budget === "number") {
+      const squadValue = players.reduce((s, p) => s + (Number(p.price) || 0), 0);
+      return { cash: data.budget - squadValue, players };
+    }
+    return { cash: 0, players };
   }
 
   async function loginWithName(name) {
@@ -409,15 +416,7 @@
     setStatus("Lade …", false);
     try {
       const snap = await get(ref(db, `kassenbuch/${nameKey}`));
-      if (snap.exists()) {
-        const data = snap.val();
-        state = {
-          budget: typeof data.budget === "number" ? data.budget : 50000000,
-          players: Array.isArray(data.players) ? data.players : [],
-        };
-      } else {
-        state = { budget: 50000000, players: [] };
-      }
+      state = snap.exists() ? migrateState(snap.val()) : { cash: 0, players: [] };
       render();
       setStatus("✓ Gespeichert", false);
     } catch (e) {
@@ -428,11 +427,7 @@
     onValue(ref(db, `kassenbuch/${nameKey}`), (snap) => {
       if (suppressNextRemoteWrite) { suppressNextRemoteWrite = false; return; }
       if (!snap.exists()) return;
-      const data = snap.val();
-      state = {
-        budget: typeof data.budget === "number" ? data.budget : state.budget,
-        players: Array.isArray(data.players) ? data.players : state.players,
-      };
+      state = migrateState(snap.val());
       render();
     });
   }
@@ -574,19 +569,17 @@
       if (cash == null) {
         cash = await kbFetchBudget();
       }
-      const squadValue = players.reduce((s, p) => s + (Number(p.price) || 0), 0);
-      const budget = cash != null ? cash + squadValue : null;
 
       nameKey = "kickbase_" + sanitizeKey(String(kb.userId));
       localStorage.setItem(LOCAL_NAME_KEY, nameKey);
       pushHistory();
-      state = { budget: budget != null ? budget : (state.budget || 50000000), players };
+      state = { cash: cash != null ? cash : (state.cash || 0), players };
       showApp();
       render();
       scheduleSave();
-      if (budget == null) {
+      if (cash == null) {
         setTimeout(() => {
-          setStatus("⚠ Guthaben konnte nicht automatisch übernommen werden, bitte Startbudget oben von Hand eintragen (Kaderwert + Restguthaben).", true);
+          setStatus("⚠ Restgeld konnte nicht automatisch übernommen werden, bitte oben von Hand eintragen.", true);
         }, 700);
       }
       el("market-section").classList.remove("hidden");
@@ -657,7 +650,9 @@
               <span class="pprice num">${fmt(price)}</span>
               ${expiryText ? `<span class="market-expiry">${expiryText}</span>` : `<span class="market-expiry">Ablauf unbekannt</span>`}
             </div>
+            <button class="row-remove" title="Zum Kader hinzufügen">+</button>
           `;
+          row.querySelector("button").addEventListener("click", () => addFromMarket(name, pos, price));
           marketList.appendChild(row);
         });
       }
@@ -668,6 +663,18 @@
     }
   }
 
+  function addFromMarket(name, pos, suggestedPrice) {
+    const input = prompt(`Preis für ${name} eingeben:`, suggestedPrice || "");
+    if (input === null) return;
+    const price = Number(String(input).replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(price) || price <= 0) return;
+    pushHistory();
+    state.players.push({ id: Date.now(), name, pos, price });
+    state.cash = state.cash - price;
+    render();
+    scheduleSave();
+  }
+
   function logout() {
     localStorage.removeItem(LOCAL_NAME_KEY);
     nameKey = null;
@@ -675,7 +682,7 @@
     history = [];
     el("undo-btn").disabled = true;
     el("market-section").classList.add("hidden");
-    state = { budget: 50000000, players: [] };
+    state = { cash: 0, players: [] };
     el("login-name").value = "";
     showLogin();
   }
@@ -687,8 +694,8 @@
   el("add-btn").addEventListener("click", addPlayer);
   el("p-name").addEventListener("keydown", (e) => { if (e.key === "Enter") addPlayer(); });
   el("p-price").addEventListener("keydown", (e) => { if (e.key === "Enter") addPlayer(); });
-  el("budget-input").addEventListener("blur", applyBudget);
-  el("budget-input").addEventListener("keydown", (e) => { if (e.key === "Enter") applyBudget(); });
+  el("cash-input").addEventListener("blur", applyCash);
+  el("cash-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { applyCash(); e.target.blur(); } });
   el("paste-btn").addEventListener("click", parsePaste);
   el("undo-btn").addEventListener("click", undo);
 
