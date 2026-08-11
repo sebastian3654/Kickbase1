@@ -440,6 +440,7 @@
   // --- Kickbase-Anbindung (Beta, inoffizielle API) ---
   function kbShowError(msg) {
     const box = el("kb-error");
+    box.style.whiteSpace = "pre-line";
     box.textContent = msg;
     box.classList.remove("hidden");
   }
@@ -511,10 +512,21 @@
       el("kb-league-btn").disabled = true;
       el("kb-league-btn").textContent = "Lade Kader …";
 
-      const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/players`, {
-        headers: { Authorization: `Bearer ${kb.token}` },
-      });
-      if (!res.ok) throw new Error(`Kader laden fehlgeschlagen (HTTP ${res.status})`);
+      const squadUrl = `${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/players`;
+      let res = await fetch(squadUrl, { headers: { Authorization: `Bearer ${kb.token}` } });
+
+      // Fallback: manche Kickbase-Versionen nutzen /squad statt /users/{id}/players
+      if (res.status === 404) {
+        const fallbackUrl = `${KB_BASE}/v4/leagues/${kb.leagueId}/squad`;
+        const res2 = await fetch(fallbackUrl, { headers: { Authorization: `Bearer ${kb.token}` } });
+        if (res2.ok) {
+          res = res2;
+        } else {
+          throw new Error(`Kader laden fehlgeschlagen (HTTP ${res.status}).\nVersucht: ${squadUrl}\nFallback (HTTP ${res2.status}): ${fallbackUrl}`);
+        }
+      } else if (!res.ok) {
+        throw new Error(`Kader laden fehlgeschlagen (HTTP ${res.status}).\nVersucht: ${squadUrl}`);
+      }
       const data = await res.json();
       const list = data.players || data.it || data;
       if (!Array.isArray(list)) throw new Error("Unerwartetes Antwortformat vom Kader-Endpunkt.");
