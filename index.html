@@ -31,7 +31,9 @@
     --warn-text:#FFB59F;
   }
   *{box-sizing:border-box;}
+  html{background:#000000;height:100%;}
   html,body{margin:0;padding:0;}
+  body{min-height:100vh;min-height:100dvh;}
   body{
     min-height:100vh;
     background:radial-gradient(1100px 500px at 50% -10%, #141416 0%, #000000 60%);
@@ -157,6 +159,7 @@
   <div class="row" style="margin-bottom:6px;">
     <h1>Kassenbuch</h1>
     <div style="display:flex;gap:8px;">
+      <button id="refresh-btn" class="btn">↻ Aktualisieren</button>
       <button id="undo-btn" class="btn" disabled>↩ Zurück</button>
       <button id="logout-btn" class="btn">Abmelden</button>
       <button id="reset-btn" class="btn">Reset</button>
@@ -452,6 +455,7 @@
     try {
       const res = await fetch(`${KB_BASE}/v4/user/login`, {
         method: "POST",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ em: email, pass: pass, loy: false, rep: {} }),
       });
@@ -465,6 +469,7 @@
       let leagues = data.leagues || data.l;
       if (!leagues) {
         const lr = await fetch(`${KB_BASE}/v4/leagues/selection`, {
+          cache: "no-store",
           headers: { Authorization: `Bearer ${kb.token}` },
         });
         if (lr.ok) {
@@ -513,7 +518,7 @@
     ];
     for (const url of urls) {
       try {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${kb.token}` } });
+        const res = await fetch(url, { cache: "no-store", headers: { Authorization: `Bearer ${kb.token}` } });
         if (!res.ok) continue;
         const data = await res.json();
         const budget = pickBudget(data);
@@ -527,13 +532,13 @@
 
   async function fetchKickbaseSquad() {
     const squadUrl = `${KB_BASE}/v4/leagues/${kb.leagueId}/users/${kb.userId}/players`;
-    let res = await fetch(squadUrl, { headers: { Authorization: `Bearer ${kb.token}` } });
+    let res = await fetch(squadUrl, { cache: "no-store", headers: { Authorization: `Bearer ${kb.token}` } });
     if (res.status === 401) throw new Error("SESSION_EXPIRED");
 
     // Fallback: manche Kickbase-Versionen nutzen /squad statt /users/{id}/players
     if (res.status === 404) {
       const fallbackUrl = `${KB_BASE}/v4/leagues/${kb.leagueId}/squad`;
-      const res2 = await fetch(fallbackUrl, { headers: { Authorization: `Bearer ${kb.token}` } });
+      const res2 = await fetch(fallbackUrl, { cache: "no-store", headers: { Authorization: `Bearer ${kb.token}` } });
       if (res2.ok) {
         res = res2;
       } else {
@@ -635,6 +640,7 @@
     statusEl.className = "status-line";
     try {
       const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/market`, {
+        cache: "no-store",
         headers: { Authorization: `Bearer ${kb.token}` },
       });
       if (res.status === 401) { handleKbSessionExpired(); return; }
@@ -722,6 +728,24 @@
     setStatus("⚠ Kickbase-Sitzung abgelaufen — bitte über \"Abmelden\" neu mit Kickbase verbinden.", true);
   }
 
+  async function manualRefresh() {
+    const btn = el("refresh-btn");
+    if (!kb.token || !kb.leagueId) {
+      setStatus("⚠ Keine Kickbase-Verbindung — Werte müssen per Bild/Liste aktualisiert werden.", true);
+      return;
+    }
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Aktualisiere …";
+    try {
+      await Promise.all([refreshSquadValues(), kbLoadMarket()]);
+      setStatus("✓ Aktualisiert", false);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
   function refreshAll() {
     refreshSquadValues();
     kbLoadMarket();
@@ -761,6 +785,7 @@
 
   el("login-btn").addEventListener("click", () => loginWithName(el("login-name").value));
   el("login-name").addEventListener("keydown", (e) => { if (e.key === "Enter") loginWithName(el("login-name").value); });
+  el("refresh-btn").addEventListener("click", manualRefresh);
   el("logout-btn").addEventListener("click", logout);
   el("reset-btn").addEventListener("click", resetAll);
   el("add-btn").addEventListener("click", addPlayer);
