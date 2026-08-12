@@ -197,23 +197,29 @@
     </div>
   </div>
 
-  <div style="margin-bottom:20px;">
-    <div class="muted" style="margin-bottom:8px;">Liste einfügen (Name; Position; Preis)</div>
-    <textarea id="paste-text" class="field" rows="4" placeholder="Eine Zeile pro Spieler, z. B.:&#10;Lotka; TW; 8296202&#10;Erlein; AB; 4881989"></textarea>
-    <div id="paste-error" class="status-error muted-2 hidden" style="margin-top:6px;"></div>
-    <button id="paste-btn" class="btn-primary" style="margin-top:8px;">Liste übernehmen</button>
+  <div id="live-readonly-note" class="muted-2 hidden" style="margin:-6px 0 14px;">
+    Aktiver Kader ist schreibgeschützt und folgt automatisch Kickbase. Zum Ausprobieren "Testmodus" nutzen.
   </div>
 
-  <div class="add-form">
-    <input id="p-name" class="field" placeholder="Spielername" />
-    <select id="p-pos" class="field">
-      <option value="TW">TW</option>
-      <option value="AB">ABW</option>
-      <option value="MF" selected>MF</option>
-      <option value="ST">ANG</option>
-    </select>
-    <input id="p-price" class="field num" placeholder="Preis" inputmode="decimal" />
-    <button id="add-btn" class="btn-primary">+ Hinzufügen</button>
+  <div id="editable-only">
+    <div style="margin-bottom:20px;">
+      <div class="muted" style="margin-bottom:8px;">Liste einfügen (Name; Position; Preis)</div>
+      <textarea id="paste-text" class="field" rows="4" placeholder="Eine Zeile pro Spieler, z. B.:&#10;Lotka; TW; 8296202&#10;Erlein; AB; 4881989"></textarea>
+      <div id="paste-error" class="status-error muted-2 hidden" style="margin-top:6px;"></div>
+      <button id="paste-btn" class="btn-primary" style="margin-top:8px;">Liste übernehmen</button>
+    </div>
+
+    <div class="add-form">
+      <input id="p-name" class="field" placeholder="Spielername" />
+      <select id="p-pos" class="field">
+        <option value="TW">TW</option>
+        <option value="AB">ABW</option>
+        <option value="MF" selected>MF</option>
+        <option value="ST">ANG</option>
+      </select>
+      <input id="p-price" class="field num" placeholder="Preis" inputmode="decimal" />
+      <button id="add-btn" class="btn-primary">+ Hinzufügen</button>
+    </div>
   </div>
 
   <div id="player-list"></div>
@@ -310,6 +316,7 @@
     }
     const posOrder = { TW: 0, AB: 1, MF: 2, ST: 3 };
     const sortedPlayers = [...state.players].sort((a, b) => (posOrder[a.pos] ?? 9) - (posOrder[b.pos] ?? 9));
+    const editable = mode === "sandbox";
     sortedPlayers.forEach((p) => {
       const row = document.createElement("div");
       row.className = "player-row";
@@ -318,9 +325,9 @@
         <span class="pname">${escapeHtml(p.name)}</span>
         <span class="ppos">${posLabel[p.pos] || p.pos}</span>
         <span class="pprice num">${fmt(p.price)}</span>
-        <button class="row-remove" data-id="${p.id}" title="Entfernen">✕</button>
+        ${editable ? `<button class="row-remove" data-id="${p.id}" title="Entfernen">✕</button>` : `<span></span>`}
       `;
-      row.querySelector(".row-remove").addEventListener("click", () => removePlayer(p.id));
+      if (editable) row.querySelector(".row-remove").addEventListener("click", () => removePlayer(p.id));
       list.appendChild(row);
     });
   }
@@ -367,9 +374,13 @@
   }
 
   function updateModeUI() {
+    const editable = mode === "sandbox";
     el("mode-live-btn").classList.toggle("mode-btn-active", mode === "live");
     el("mode-sandbox-btn").classList.toggle("mode-btn-active", mode === "sandbox");
-    el("sandbox-note").classList.toggle("hidden", mode !== "sandbox");
+    el("sandbox-note").classList.toggle("hidden", !editable);
+    el("live-readonly-note").classList.toggle("hidden", editable);
+    el("editable-only").classList.toggle("hidden", !editable);
+    el("cash-input").readOnly = !editable;
     el("undo-btn").disabled = history().length === 0;
   }
 
@@ -382,14 +393,8 @@
         sandboxData = JSON.parse(JSON.stringify(liveData));
       }
       state = sandboxData;
-      stopMarketAutoRefresh();
-      el("market-section").classList.add("hidden");
     } else {
       state = liveData;
-      if (kb.token && kb.leagueId) {
-        el("market-section").classList.remove("hidden");
-        startMarketAutoRefresh();
-      }
     }
     updateModeUI();
     render();
@@ -675,6 +680,7 @@
       pushHistory();
       setState({ cash: cash != null ? cash : (state.cash || 0), players });
       showApp();
+      updateModeUI();
       render();
       scheduleSave();
       if (cash == null) {
@@ -771,6 +777,10 @@
   }
 
   function addFromMarket(name, pos, suggestedPrice, kbId) {
+    if (mode !== "sandbox") {
+      setStatus("⚠ Aktiver Kader ist schreibgeschützt — zum Ausprobieren \"Testmodus\" oben wählen.", true);
+      return;
+    }
     const input = prompt(`Preis für ${name} eingeben:`, suggestedPrice || "");
     if (input === null) return;
     const price = Number(String(input).replace(/\./g, "").replace(",", "."));
@@ -819,10 +829,6 @@
 
   async function manualRefresh() {
     const btn = el("refresh-btn");
-    if (mode !== "live") {
-      setStatus("⚠ Im Testmodus keine Live-Aktualisierung — zurück zu \"Aktiver Kader\" wechseln.", true);
-      return;
-    }
     if (!kb.token || !kb.leagueId) {
       setStatus("⚠ Keine Kickbase-Verbindung — Werte müssen per Bild/Liste aktualisiert werden.", true);
       return;
@@ -831,7 +837,9 @@
     const original = btn.textContent;
     btn.textContent = "Aktualisiere …";
     try {
-      await Promise.all([refreshSquadValues(), kbLoadMarket()]);
+      const jobs = [kbLoadMarket()];
+      if (mode === "live") jobs.push(refreshSquadValues());
+      await Promise.all(jobs);
       setStatus("✓ Aktualisiert", false);
     } finally {
       btn.disabled = false;
@@ -840,8 +848,7 @@
   }
 
   function refreshAll() {
-    if (mode !== "live") return;
-    refreshSquadValues();
+    if (mode === "live") refreshSquadValues();
     kbLoadMarket();
   }
 
