@@ -283,7 +283,9 @@
       list.innerHTML = `<div class="empty">Noch keine Spieler im Kader. Liste einfügen oder oben manuell eintragen.</div>`;
       return;
     }
-    state.players.forEach((p) => {
+    const posOrder = { TW: 0, AB: 1, MF: 2, ST: 3 };
+    const sortedPlayers = [...state.players].sort((a, b) => (posOrder[a.pos] ?? 9) - (posOrder[b.pos] ?? 9));
+    sortedPlayers.forEach((p) => {
       const row = document.createElement("div");
       row.className = "player-row";
       row.innerHTML = `
@@ -657,11 +659,15 @@
       if (!Array.isArray(list) || list.length === 0) {
         marketList.innerHTML = `<div class="empty">Transfermarkt ist aktuell leer oder geschlossen.</div>`;
       } else {
-        list.forEach((p) => {
-          const name = [p.fn || p.firstName, p.ln || p.lastName || p.n].filter(Boolean).join(" ") || "Unbekannt";
-          const pos = posMap[p.pos || p.position] || "MF";
-          const price = Number(p.prc || p.price || p.mv || p.marketValue || 0);
-          const expiryText = formatExpiry(p);
+        const normalized = list.map((p) => ({
+          name: [p.fn || p.firstName, p.ln || p.lastName || p.n].filter(Boolean).join(" ") || "Unbekannt",
+          pos: posMap[p.pos || p.position] || "MF",
+          price: Number(p.prc || p.price || p.mv || p.marketValue || 0),
+          expiryText: formatExpiry(p),
+          kbId: p.id != null ? String(p.id) : null,
+        }));
+        normalized.sort((a, b) => b.price - a.price);
+        normalized.forEach(({ name, pos, price, expiryText, kbId }) => {
           const row = document.createElement("div");
           row.className = "market-row";
           row.innerHTML = `
@@ -674,7 +680,7 @@
             </div>
             <button class="row-remove" title="Zum Kader hinzufügen">+</button>
           `;
-          row.querySelector("button").addEventListener("click", () => addFromMarket(name, pos, price, p.id != null ? String(p.id) : null));
+          row.querySelector("button").addEventListener("click", () => addFromMarket(name, pos, price, kbId));
           marketList.appendChild(row);
         });
       }
