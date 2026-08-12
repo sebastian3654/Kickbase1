@@ -395,6 +395,7 @@
       state = sandboxData;
     } else {
       state = liveData;
+      if (kb.token && kb.leagueId) refreshAll();
     }
     updateModeUI();
     render();
@@ -792,25 +793,20 @@
     scheduleSave();
   }
 
-  async function refreshSquadValues() {
+  async function refreshLiveSquad() {
     if (!kb.token || !kb.leagueId || !kb.userId) return;
     try {
-      const { players: fresh } = await fetchKickbaseSquad();
-      const priceByKbId = new Map(fresh.filter((p) => p.kbId).map((p) => [p.kbId, p.price]));
-      let changed = false;
-      state.players.forEach((p) => {
-        if (p.kbId && priceByKbId.has(p.kbId)) {
-          const newPrice = priceByKbId.get(p.kbId);
-          if (newPrice !== p.price) {
-            p.price = newPrice;
-            changed = true;
-          }
-        }
-      });
-      if (changed) {
+      const { players: fresh, raw } = await fetchKickbaseSquad();
+      let cash = pickBudget(raw);
+      if (cash == null) cash = await kbFetchBudget();
+
+      liveData.players = fresh;
+      if (cash != null) liveData.cash = cash;
+      if (mode === "live") {
+        state = liveData;
         render();
-        scheduleSave();
       }
+      scheduleSave();
     } catch (e) {
       if (e && e.message === "SESSION_EXPIRED") {
         handleKbSessionExpired();
@@ -838,7 +834,7 @@
     btn.textContent = "Aktualisiere …";
     try {
       const jobs = [kbLoadMarket()];
-      if (mode === "live") jobs.push(refreshSquadValues());
+      if (mode === "live") jobs.push(refreshLiveSquad());
       await Promise.all(jobs);
       setStatus("✓ Aktualisiert", false);
     } finally {
@@ -848,7 +844,7 @@
   }
 
   function refreshAll() {
-    if (mode === "live") refreshSquadValues();
+    if (mode === "live") refreshLiveSquad();
     kbLoadMarket();
   }
 
