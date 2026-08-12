@@ -70,6 +70,7 @@
     padding:10px 12px;font-size:14px;outline:none;font-family:inherit;width:100%;
   }
   .field:focus{border-color:#3a3a3f;}
+  .field:read-only{color:var(--muted);cursor:default;}
   .num{font-variant-numeric:tabular-nums;}
   .muted{color:var(--muted);font-size:13px;}
   .muted-2{color:var(--muted-2);font-size:12px;}
@@ -302,7 +303,7 @@
     const squadEl = el("score-squad");
     squadEl.textContent = fmt(squadValue);
     squadEl.style.color = "var(--accent)";
-    cashEl.style.color = state.cash < 0 ? "var(--danger)" : "#FFFFFF";
+    cashEl.style.color = state.cash < 0 ? "var(--danger)" : "";
     [squadEl].forEach((n) => {
       const len = n.textContent.length;
       n.style.fontSize = (len > 12 ? 16 : len > 10 ? 19 : len > 8 ? 22 : 26) + "px";
@@ -501,6 +502,9 @@
     nameKey = sanitizeKey(name);
     localStorage.setItem(LOCAL_NAME_KEY, name.trim());
     showApp();
+    mode = "live";
+    state = liveData;
+    updateModeUI();
     setStatus("Lade …", false);
     try {
       const snap = await get(ref(db, `kassenbuch/${nameKey}`));
