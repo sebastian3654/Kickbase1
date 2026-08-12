@@ -49,6 +49,12 @@
     border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:inherit;
   }
   .btn:hover{border-color:#3a3a3f;}
+  .mode-btn{
+    background:transparent;border:none;color:var(--muted-2);padding:10px 8px;font-size:13px;
+    font-weight:600;cursor:pointer;font-family:inherit;
+  }
+  .mode-btn-active{background:var(--accent);color:var(--accent-text);}
+  .mode-btn:not(.mode-btn-active):hover{color:var(--text);}
   .btn-primary{
     background:var(--accent);color:var(--accent-text);border:none;
     border-radius:6px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;
@@ -166,6 +172,15 @@
     </div>
   </div>
   <p class="muted" id="subtitle" style="margin:0 0 8px;"></p>
+
+  <div id="mode-toggle" style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;">
+    <button id="mode-live-btn" class="mode-btn mode-btn-active" style="flex:1;">Aktiver Kader</button>
+    <button id="mode-sandbox-btn" class="mode-btn" style="flex:1;">Testmodus</button>
+  </div>
+  <div id="sandbox-note" class="muted-2 hidden" style="margin:-6px 0 14px;">
+    Testmodus: Änderungen hier wirken sich nicht auf deinen aktiven Kader aus.
+  </div>
+
   <p class="status-line" id="status-line">&nbsp;</p>
   <div id="warn-box" class="warn hidden"></div>
 
@@ -232,11 +247,15 @@
   const posLabel = { TW: "TW", AB: "ABW", MF: "MF", ST: "ANG" };
   const sanitizeKey = (name) => name.trim().toLowerCase().replace(/[.#$\[\]\/\s]+/g, "_");
 
-  let state = { cash: 0, players: [] };
+  let mode = "live"; // "live" | "sandbox"
+  let liveData = { cash: 0, players: [] };
+  let sandboxData = { cash: 0, players: [] };
+  let state = liveData;
   let nameKey = null;
   let suppressNextRemoteWrite = false;
   let saveTimer = null;
-  let history = [];
+  let historyLive = [];
+  let historySandbox = [];
   const HISTORY_LIMIT = 30;
 
   // Kickbase (Beta, inoffiziell)
@@ -245,6 +264,7 @@
   let marketInterval = null;
 
   const el = (id) => document.getElementById(id);
+  const history = () => (mode === "live" ? historyLive : historySandbox);
 
   function showApp() {
     el("login-screen").classList.add("hidden");
@@ -310,7 +330,7 @@
     saveTimer = setTimeout(async () => {
       try {
         suppressNextRemoteWrite = true;
-        await set(ref(db, `kassenbuch/${nameKey}`), state);
+        await set(ref(db, `kassenbuch/${nameKey}`), { live: liveData, sandbox: sandboxData });
         setStatus("✓ Gespeichert", false);
       } catch (e) {
         setStatus("⚠ Nicht gespeichert — " + (e && e.message ? e.message : "Fehler"), true);
@@ -318,17 +338,55 @@
     }, 400);
   }
 
+  function setState(obj) {
+    state = obj;
+    if (mode === "live") liveData = obj;
+    else sandboxData = obj;
+  }
+
   function pushHistory() {
-    history.push(JSON.stringify({ cash: state.cash, players: state.players }));
-    if (history.length > HISTORY_LIMIT) history.shift();
+    const h = history();
+    h.push(JSON.stringify({ cash: state.cash, players: state.players }));
+    if (h.length > HISTORY_LIMIT) h.shift();
     el("undo-btn").disabled = false;
   }
 
   function undo() {
-    if (history.length === 0) return;
-    const prev = JSON.parse(history.pop());
-    state = { cash: prev.cash, players: prev.players };
-    el("undo-btn").disabled = history.length === 0;
+    const h = history();
+    if (h.length === 0) return;
+    const prev = JSON.parse(h.pop());
+    setState({ cash: prev.cash, players: prev.players });
+    el("undo-btn").disabled = h.length === 0;
+    render();
+    scheduleSave();
+  }
+
+  function updateModeUI() {
+    el("mode-live-btn").classList.toggle("mode-btn-active", mode === "live");
+    el("mode-sandbox-btn").classList.toggle("mode-btn-active", mode === "sandbox");
+    el("sandbox-note").classList.toggle("hidden", mode !== "sandbox");
+    el("undo-btn").disabled = history().length === 0;
+  }
+
+  function switchMode(newMode) {
+    if (newMode === mode) return;
+    mode = newMode;
+    if (mode === "sandbox") {
+      if (sandboxData.players.length === 0 && sandboxData.cash === 0) {
+        // Testmodus startet als Kopie deines aktiven Kaders
+        sandboxData = JSON.parse(JSON.stringify(liveData));
+      }
+      state = sandboxData;
+      stopMarketAutoRefresh();
+      el("market-section").classList.add("hidden");
+    } else {
+      state = liveData;
+      if (kb.token && kb.leagueId) {
+        el("market-section").classList.remove("hidden");
+        startMarketAutoRefresh();
+      }
+    }
+    updateModeUI();
     render();
     scheduleSave();
   }
@@ -402,21 +460,29 @@
   function resetAll() {
     if (!confirm("Wirklich alles zurücksetzen? Kader und Restgeld werden gelöscht.")) return;
     pushHistory();
-    state = { cash: 0, players: [] };
+    setState({ cash: 0, players: [] });
     render();
     scheduleSave();
   }
 
-  function migrateState(data) {
+  function normalizeSlot(data) {
+    if (!data) return { cash: 0, players: [] };
     const players = Array.isArray(data.players) ? data.players : [];
-    if (typeof data.cash === "number") {
-      return { cash: data.cash, players };
-    }
+    if (typeof data.cash === "number") return { cash: data.cash, players };
     if (typeof data.budget === "number") {
       const squadValue = players.reduce((s, p) => s + (Number(p.price) || 0), 0);
       return { cash: data.budget - squadValue, players };
     }
     return { cash: 0, players };
+  }
+
+  function migrateFull(data) {
+    if (!data) return { live: { cash: 0, players: [] }, sandbox: { cash: 0, players: [] } };
+    if (data.live) {
+      return { live: normalizeSlot(data.live), sandbox: normalizeSlot(data.sandbox) };
+    }
+    // Alter, flacher Datenstand ohne Modi -> wird zum Live-Kader
+    return { live: normalizeSlot(data), sandbox: { cash: 0, players: [] } };
   }
 
   async function loginWithName(name) {
@@ -427,7 +493,12 @@
     setStatus("Lade …", false);
     try {
       const snap = await get(ref(db, `kassenbuch/${nameKey}`));
-      state = snap.exists() ? migrateState(snap.val()) : { cash: 0, players: [] };
+      const migrated = migrateFull(snap.exists() ? snap.val() : null);
+      liveData = migrated.live;
+      sandboxData = migrated.sandbox;
+      mode = "live";
+      state = liveData;
+      updateModeUI();
       render();
       setStatus("✓ Gespeichert", false);
     } catch (e) {
@@ -438,7 +509,10 @@
     onValue(ref(db, `kassenbuch/${nameKey}`), (snap) => {
       if (suppressNextRemoteWrite) { suppressNextRemoteWrite = false; return; }
       if (!snap.exists()) return;
-      state = migrateState(snap.val());
+      const migrated = migrateFull(snap.val());
+      liveData = migrated.live;
+      sandboxData = migrated.sandbox;
+      state = mode === "live" ? liveData : sandboxData;
       render();
     });
   }
@@ -594,7 +668,7 @@
       localStorage.setItem(LOCAL_NAME_KEY, nameKey);
       localStorage.setItem(LOCAL_KB_KEY, JSON.stringify({ token: kb.token, userId: kb.userId, leagueId: kb.leagueId }));
       pushHistory();
-      state = { cash: cash != null ? cash : (state.cash || 0), players };
+      setState({ cash: cash != null ? cash : (state.cash || 0), players });
       showApp();
       render();
       scheduleSave();
@@ -740,6 +814,10 @@
 
   async function manualRefresh() {
     const btn = el("refresh-btn");
+    if (mode !== "live") {
+      setStatus("⚠ Im Testmodus keine Live-Aktualisierung — zurück zu \"Aktiver Kader\" wechseln.", true);
+      return;
+    }
     if (!kb.token || !kb.leagueId) {
       setStatus("⚠ Keine Kickbase-Verbindung — Werte müssen per Bild/Liste aktualisiert werden.", true);
       return;
@@ -757,6 +835,7 @@
   }
 
   function refreshAll() {
+    if (mode !== "live") return;
     refreshSquadValues();
     kbLoadMarket();
   }
@@ -785,10 +864,14 @@
     localStorage.removeItem(LOCAL_KB_KEY);
     nameKey = null;
     kb = { token: null, userId: null, leagueId: null };
-    history = [];
+    historyLive = [];
+    historySandbox = [];
     el("undo-btn").disabled = true;
     el("market-section").classList.add("hidden");
-    state = { cash: 0, players: [] };
+    mode = "live";
+    liveData = { cash: 0, players: [] };
+    sandboxData = { cash: 0, players: [] };
+    state = liveData;
     el("login-name").value = "";
     showLogin();
   }
@@ -805,6 +888,8 @@
   el("cash-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { applyCash(); e.target.blur(); } });
   el("paste-btn").addEventListener("click", parsePaste);
   el("undo-btn").addEventListener("click", undo);
+  el("mode-live-btn").addEventListener("click", () => switchMode("live"));
+  el("mode-sandbox-btn").addEventListener("click", () => switchMode("sandbox"));
 
   el("kb-toggle").addEventListener("click", () => {
     el("kb-box").classList.toggle("hidden");
