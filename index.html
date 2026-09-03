@@ -730,17 +730,23 @@
   }
 
   async function kbLoadMarket() {
-    if (!kb.token || !kb.leagueId) return;
-    const statusEl = el("market-status");
-    statusEl.textContent = "Lade Transfermarkt …";
-    statusEl.className = "status-line";
-    try {
-      const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/market`, {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${kb.token}` },
-      });
-      if (res.status === 401) { handleKbSessionExpired(); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!kb.token || !kb.leagueId) return;
+  const statusEl = el("market-status");
+  statusEl.textContent = "Lade Transfermarkt …";
+  statusEl.className = "status-line";
+  try {
+    const res = await fetch(`${KB_BASE}/v4/leagues/${kb.leagueId}/market`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${kb.token}` },
+    });
+    if (res.status === 401) { handleKbSessionExpired(); return; }
+    if (!res.ok) {
+      let bodyText = "";
+      try { bodyText = await res.text(); } catch (e) {}
+      console.error("Market-Fehler", res.status, bodyText);
+      throw new Error(`HTTP ${res.status}${bodyText ? " — " + bodyText.slice(0, 200) : ""}`);
+    }
+
       const data = await res.json();
       const list = data.players || data.it || data.market || [];
       const posMap = { 1: "TW", 2: "AB", 3: "MF", 4: "ST" };
